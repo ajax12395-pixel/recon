@@ -18,17 +18,18 @@ collect_urls() {
 
   log info "Phase 05: URL collection starting"
 
-  # waybackurls
-  if require_tool waybackurls; then
-    log info "Running waybackurls..."
-    cat "$IN" | waybackurls > "$OUT/raw/waybackurls.txt" 2>>"$ERR_LOG"
-    check_output "$OUT/raw/waybackurls.txt" "waybackurls"
+  # urlfinder (ProjectDiscovery passive URL discovery)
+  if require_tool urlfinder; then
+    log info "Running urlfinder..."
+    urlfinder -d "$TARGET" -all \
+      -o "$OUT/raw/urlfinder.txt" 2>>"$ERR_LOG"
+    check_output "$OUT/raw/urlfinder.txt" "urlfinder"
   fi
 
   # waymore
   if require_tool waymore; then
     log info "Running waymore (root-domain first)..."
-    waymore -i "$TARGET" -mode U -l 1000 -from 2020 \
+    waymore -i "$TARGET" -mode U \
       -oU "$OUT/raw/waymore.txt" 2>>"$ERR_LOG" || true
 
     if [ ! -s "$OUT/raw/waymore.txt" ] && [ "$TARGET_MODE" = "wildcard" ]; then
@@ -45,7 +46,7 @@ collect_urls() {
           break
         fi
 
-        waymore -i "$live_url" -mode U -l 300 -from 2020 \
+        waymore -i "$live_url" -mode U \
           -oU "$tmp_waymore" 2>>"$ERR_LOG" || true
 
         [ -s "$tmp_waymore" ] && cat "$tmp_waymore" >> "$OUT/raw/waymore.txt"
@@ -61,57 +62,29 @@ collect_urls() {
     check_output "$OUT/raw/waymore.txt" "waymore"
   fi
 
-  # gau (with GitHub and OTX sources if keys available)
-  if require_tool gau; then
-    log info "Running gau..."
-    local GAU_PROVIDERS="wayback,commoncrawl,otx,urlscan"
-    local tmp_gau_inputs="/tmp/recon_gau_inputs_$$.txt"
-    sed -E 's#^https?://##; s#/.*$##; s#:[0-9]+$##' "$IN" | sort -u > "$tmp_gau_inputs"
-
-    cat "$tmp_gau_inputs" | gau \
-      --threads "$GAU_THREADS" \
-      --providers "$GAU_PROVIDERS" \
-      >> "$OUT/raw/gau.txt" 2>>"$ERR_LOG"
-
-    rm -f "$tmp_gau_inputs"
-    check_output "$OUT/raw/gau.txt" "gau"
-  fi
-
-  # hakrawler
-  if require_tool hakrawler; then
-    log info "Running hakrawler..."
-    cat "$IN" | hakrawler -subs -u -insecure \
-      > "$OUT/raw/hakrawler.txt" 2>>"$ERR_LOG"
-    check_output "$OUT/raw/hakrawler.txt" "hakrawler"
-  fi
-
   # katana (JavaScript-aware crawler)
   if require_tool katana; then
     log info "Running katana..."
-    katana -l "$IN" \
+    katana -silent -list "$IN" \
       -jc -kf all \
+      -c "$KATANA_CONCURRENCY" \
       -d "$KATANA_DEPTH" \
-      -concurrency "$KATANA_CONCURRENCY" \
-      -headless -fx -aff \
-      -fs rdn -f url -silent \
+      -fs rdn \
       > "$OUT/raw/katana.txt" 2>>"$ERR_LOG"
     check_output "$OUT/raw/katana.txt" "katana"
   fi
 
-  # gospider
-  if require_tool gospider; then
-    log info "Running gospider..."
-    local tmp_gospider="/tmp/gospider_raw_$$"
-    mkdir -p "$tmp_gospider"
-    gospider -S "$IN" \
-      -t 20 -d 3 \
-      --js --sitemap --robots \
-      -o "$tmp_gospider/" 2>>"$ERR_LOG"
-    find "$tmp_gospider/" -type f -exec cat {} \; 2>>"$ERR_LOG" \
-      | grep -oE "https?://[^ ]+" \
-      > "$OUT/raw/gospider.txt"
-    rm -rf "$tmp_gospider/"
-    check_output "$OUT/raw/gospider.txt" "gospider"
+  # github-endpoints (discover endpoints leaked in public GitHub repos)
+  local GITHUB_TOKENS="${GITHUB_TOKENS:-$HOME/tools/.github_tokens}"
+  if require_tool github-endpoints; then
+    if [ -s "$GITHUB_TOKENS" ]; then
+      log info "Running github-endpoints..."
+      github-endpoints -q -k -d "$TARGET" -t "$GITHUB_TOKENS" \
+        -o "$OUT/raw/github-endpoints.txt" 2>>"$ERR_LOG"
+      check_output "$OUT/raw/github-endpoints.txt" "github-endpoints"
+    else
+      log warn "github-endpoints skipped: no GitHub tokens file found at $GITHUB_TOKENS"
+    fi
   fi
 
   # ── MERGE ALL URLs ────────────────────────────────────────
