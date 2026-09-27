@@ -72,28 +72,14 @@ port_scan() {
   log info "Resolved IPs (no CDN): ${nocdn_count:-0}"
 
   # ── Optional CDN bypass: try to recover real origin IPs ───
-  if [ "${CDN_BYPASS:-true}" = "true" ] && require_tool hakoriginfinder; then
-    log info "Attempting CDN bypass (origin IP discovery)..."
-    # hakoriginfinder wraps naabu internally and sometimes prints an
-    # interactive "Press ENTER to continue" prompt (VPN warning) that
-    # blocks forever in a non-interactive script. Feed it empty stdin
-    # answers via `yes ""` and hard-cap the whole step with `timeout`
-    # so a stuck prompt can never hang the pipeline.
-    timeout "${HAKORIGINFINDER_TIMEOUT:-300}" bash -c \
-      'yes "" | hakoriginfinder < "$1"' _ "$tmp_hosts" \
-      > "$OUT/hakoriginfinder_raw.txt" 2>>"$ERR_LOG" || true
-    if [ -s "$OUT/hakoriginfinder_raw.txt" ]; then
-      grep -aoE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' "$OUT/hakoriginfinder_raw.txt" \
-        | grep -aEiv "^(127|10|169\.254|172\.1[6-9]|172\.2[0-9]|172\.3[0-1]|192\.168)\." \
-        | sort -u > "$OUT/origin_ips.txt"
-      if [ -s "$OUT/origin_ips.txt" ]; then
-        cat "$OUT/origin_ips.txt" >> "$ips_nocdn"
-        cat "$OUT/origin_ips.txt" >> "$ips_all"
-        sort -u "$ips_nocdn" -o "$ips_nocdn"
-        sort -u "$ips_all" -o "$ips_all"
-        log info "Origin IPs recovered: $(wc -l < "$OUT/origin_ips.txt" | tr -d ' ')"
-      fi
-    fi
+  # NOTE: hakoriginfinder requires a full IP range (e.g. via `prips`)
+  # plus a single -h <url> target — it does NOT accept a list of
+  # hostnames via stdin (confirmed against the tool's own usage/docs).
+  # We don't have a reliable IP range to feed it in this pipeline, so
+  # this step is disabled by default. Set CDN_BYPASS=true only if you
+  # provide your own IP-range logic here.
+  if [ "${CDN_BYPASS:-false}" = "true" ] && require_tool hakoriginfinder; then
+    log warn "CDN_BYPASS is enabled but hakoriginfinder needs an IP range (prips) + -h <url>, not a hostname list. Skipping — see comment in ports.sh."
   fi
 
   # Fall back to raw hostnames if we have no resolved IPs at all
