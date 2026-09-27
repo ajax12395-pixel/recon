@@ -44,7 +44,7 @@ port_scan() {
     dnsx -l "$tmp_hosts" -a -resp-only -silent 2>>"$ERR_LOG" \
       | grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' \
       | grep -aEiv "^(127|10|169\.254|172\.1[6-9]|172\.2[0-9]|172\.3[0-1]|192\.168)\." \
-      | sort -u > "$ips_all"
+      | sort -u > "$ips_all" || true
   else
     log warn "dnsx not found; falling back to naabu resolving hostnames directly (no CDN filtering)."
   fi
@@ -56,7 +56,7 @@ port_scan() {
   if [ -s "$ips_all" ] && require_tool cdncheck; then
     log info "Checking for CDN/WAF providers..."
     cdncheck -silent -resp -cdn -waf -nc < "$ips_all" 2>>"$ERR_LOG" \
-      | sort -u > "$OUT/cdn_providers.txt"
+      | sort -u > "$OUT/cdn_providers.txt" || true
     check_output "$OUT/cdn_providers.txt" "cdncheck"
 
     if [ -s "$OUT/cdn_providers.txt" ]; then
@@ -74,7 +74,14 @@ port_scan() {
   # ── Optional CDN bypass: try to recover real origin IPs ───
   if [ "${CDN_BYPASS:-true}" = "true" ] && require_tool hakoriginfinder; then
     log info "Attempting CDN bypass (origin IP discovery)..."
-    hakoriginfinder < "$tmp_hosts" > "$OUT/hakoriginfinder_raw.txt" 2>>"$ERR_LOG" || true
+    # hakoriginfinder wraps naabu internally and sometimes prints an
+    # interactive "Press ENTER to continue" prompt (VPN warning) that
+    # blocks forever in a non-interactive script. Feed it empty stdin
+    # answers via `yes ""` and hard-cap the whole step with `timeout`
+    # so a stuck prompt can never hang the pipeline.
+    timeout "${HAKORIGINFINDER_TIMEOUT:-300}" bash -c \
+      'yes "" | hakoriginfinder < "$1"' _ "$tmp_hosts" \
+      > "$OUT/hakoriginfinder_raw.txt" 2>>"$ERR_LOG" || true
     if [ -s "$OUT/hakoriginfinder_raw.txt" ]; then
       grep -aoE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' "$OUT/hakoriginfinder_raw.txt" \
         | grep -aEiv "^(127|10|169\.254|172\.1[6-9]|172\.2[0-9]|172\.3[0-1]|192\.168)\." \
@@ -109,7 +116,7 @@ port_scan() {
     ${NAABU_PORTS:---top-ports 1000} \
     -rate "${NAABU_RATE:-1000}" \
     -silent \
-    -o "$OUT/naabu_ports.txt" 2>>"$ERR_LOG"
+    -o "$OUT/naabu_ports.txt" 2>>"$ERR_LOG" || log warn "naabu exited with a non-zero status; continuing with whatever output it produced."
 
   if ! check_output "$OUT/naabu_ports.txt" "naabu"; then
     rm -f "$tmp_hosts"
@@ -130,12 +137,12 @@ port_scan() {
       nmap -p "$naabu_ports_csv" \
         -T4 -Pn -sV \
         -iL "$tmp_ips" \
-        -oA "$OUT/nmap_active" 2>>"$ERR_LOG"
+        -oA "$OUT/nmap_active" 2>>"$ERR_LOG" || log warn "nmap exited with a non-zero status; continuing with whatever output it produced."
     else
       log warn "Could not build port list from naabu output; falling back to default nmap top ports."
       nmap -T4 -Pn -sV \
         -iL "$tmp_ips" \
-        -oA "$OUT/nmap_active" 2>>"$ERR_LOG"
+        -oA "$OUT/nmap_active" 2>>"$ERR_LOG" || log warn "nmap exited with a non-zero status; continuing with whatever output it produced."
     fi
     rm -f "$tmp_ips"
     check_output "$OUT/nmap_active.xml" "nmap"
@@ -144,7 +151,7 @@ port_scan() {
   # ── Convert nmap XML findings into ready-to-use URLs ──────
   if require_tool nmapurls && [ -s "$OUT/nmap_active.xml" ]; then
     log info "Extracting web URLs from nmap results..."
-    nmapurls < "$OUT/nmap_active.xml" 2>>"$ERR_LOG" | sort -u > "$OUT/webs_from_ports.txt"
+    nmapurls < "$OUT/nmap_active.xml" 2>>"$ERR_LOG" | sort -u > "$OUT/webs_from_ports.txt" || true
     check_output "$OUT/webs_from_ports.txt" "nmapurls"
   fi
 
@@ -162,7 +169,7 @@ port_scan() {
 
     if require_tool smap; then
       log info "Running smap (passive port lookup)..."
-      smap -iL "$ips_nocdn" > "$OUT/portscan_passive_smap.txt" 2>>"$ERR_LOG"
+      smap -iL "$ips_nocdn" > "$OUT/portscan_passive_smap.txt" 2>>"$ERR_LOG" || true
       check_output "$OUT/portscan_passive_smap.txt" "smap"
     fi
   fi
