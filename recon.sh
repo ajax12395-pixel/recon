@@ -390,6 +390,15 @@ main() {
   banner
   parse_args "$@"
 
+  # If --only/--phase targets a specific phase, we're clearly working
+  # against an existing workspace on purpose — assume --resume so this
+  # never blocks on the interactive Resume/Overwrite/Cancel prompt.
+  # This matches reconFTW's flag-driven, non-interactive design: a
+  # targeted phase run should never require a TTY to proceed.
+  if [ -n "$ONLY_PHASE" ] && [ "$FORCE" != "true" ]; then
+    RESUME="true"
+  fi
+
   # If no target mode specified, show interactive menu
   if [ -z "$TARGET_MODE" ]; then
     interactive_menu
