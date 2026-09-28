@@ -57,7 +57,7 @@ port_scan() {
     log info "Checking for CDN/WAF providers..."
     cdncheck -silent -resp -cdn -waf -nc < "$ips_all" 2>>"$ERR_LOG" \
       | sort -u > "$OUT/cdn_providers.txt" || true
-    check_output "$OUT/cdn_providers.txt" "cdncheck"
+    check_output "$OUT/cdn_providers.txt" "cdncheck" || true
 
     if [ -s "$OUT/cdn_providers.txt" ]; then
       comm -23 <(sort -u "$ips_all") \
@@ -131,14 +131,14 @@ port_scan() {
         -oA "$OUT/nmap_active" 2>>"$ERR_LOG" || log warn "nmap exited with a non-zero status; continuing with whatever output it produced."
     fi
     rm -f "$tmp_ips"
-    check_output "$OUT/nmap_active.xml" "nmap"
+    check_output "$OUT/nmap_active.xml" "nmap" || true
   fi
 
   # ── Convert nmap XML findings into ready-to-use URLs ──────
   if require_tool nmapurls && [ -s "$OUT/nmap_active.xml" ]; then
     log info "Extracting web URLs from nmap results..."
     nmapurls < "$OUT/nmap_active.xml" 2>>"$ERR_LOG" | sort -u > "$OUT/webs_from_ports.txt" || true
-    check_output "$OUT/webs_from_ports.txt" "nmapurls"
+    check_output "$OUT/webs_from_ports.txt" "nmapurls" || true
   fi
 
   # ── Optional passive lookups (no packets sent) ────────────
@@ -150,13 +150,13 @@ port_scan() {
         [ -z "$ip" ] && continue
         curl -s "https://internetdb.shodan.io/${ip}" 2>>"$ERR_LOG" >> "$OUT/portscan_passive_shodan.json" || true
       done < "$ips_nocdn"
-      check_output "$OUT/portscan_passive_shodan.json" "shodan_internetdb"
+      check_output "$OUT/portscan_passive_shodan.json" "shodan_internetdb" || true
     fi
 
     if require_tool smap; then
       log info "Running smap (passive port lookup)..."
       smap -iL "$ips_nocdn" > "$OUT/portscan_passive_smap.txt" 2>>"$ERR_LOG" || true
-      check_output "$OUT/portscan_passive_smap.txt" "smap"
+      check_output "$OUT/portscan_passive_smap.txt" "smap" || true
     fi
   fi
 
@@ -165,7 +165,7 @@ port_scan() {
     log info "Running service fingerprinting (nerva)..."
     nerva --json -l "$OUT/naabu_ports.txt" -w "${SERVICE_FINGERPRINT_TIMEOUT_MS:-2000}" \
       -o "$OUT/service_fingerprints.jsonl" 2>>"$ERR_LOG" || true
-    check_output "$OUT/service_fingerprints.jsonl" "nerva"
+    check_output "$OUT/service_fingerprints.jsonl" "nerva" || true
   fi
 
   rm -f "$tmp_hosts"
