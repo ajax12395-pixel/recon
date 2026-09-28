@@ -41,7 +41,7 @@ port_scan() {
   : > "$ips_all"
   if require_tool dnsx; then
     log info "Resolving hosts to IPs..."
-    dnsx -l "$tmp_hosts" -a -resp-only -silent 2>>"$ERR_LOG" \
+    command dnsx -l "$tmp_hosts" -a -resp-only -silent 2>>"$ERR_LOG" \
       | grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' \
       | grep -aEiv "^(127|10|169\.254|172\.1[6-9]|172\.2[0-9]|172\.3[0-1]|192\.168)\." \
       | sort -u > "$ips_all" || true
@@ -55,7 +55,7 @@ port_scan() {
 
   if [ -s "$ips_all" ] && require_tool cdncheck; then
     log info "Checking for CDN/WAF providers..."
-    cdncheck -silent -resp -cdn -waf -nc < "$ips_all" 2>>"$ERR_LOG" \
+    command cdncheck -silent -resp -cdn -waf -nc < "$ips_all" 2>>"$ERR_LOG" \
       | sort -u > "$OUT/cdn_providers.txt" || true
     check_output "$OUT/cdn_providers.txt" "cdncheck" || true
 
@@ -98,7 +98,7 @@ port_scan() {
 
   log info "Running naabu fast port scan..."
   # shellcheck disable=SC2086  # NAABU_PORTS is meant to expand as flags
-  naabu -l "$naabu_input" \
+  command naabu -l "$naabu_input" \
     ${NAABU_PORTS:---top-ports 1000} \
     -rate "${NAABU_RATE:-1000}" \
     -silent \
@@ -120,13 +120,16 @@ port_scan() {
 
     if [ -n "$naabu_ports_csv" ]; then
       log info "Running nmap service detection on discovered ports ($naabu_ports_csv)..."
-      nmap -p "$naabu_ports_csv" \
+      # `command` bypasses any shell function/alias named nmap (this
+      # environment wraps it via a grc colouriser function that can
+      # misbehave under `set -euo pipefail` in a non-interactive script).
+      command nmap -p "$naabu_ports_csv" \
         -T4 -Pn -sV \
         -iL "$tmp_ips" \
         -oA "$OUT/nmap_active" 2>>"$ERR_LOG" || log warn "nmap exited with a non-zero status; continuing with whatever output it produced."
     else
       log warn "Could not build port list from naabu output; falling back to default nmap top ports."
-      nmap -T4 -Pn -sV \
+      command nmap -T4 -Pn -sV \
         -iL "$tmp_ips" \
         -oA "$OUT/nmap_active" 2>>"$ERR_LOG" || log warn "nmap exited with a non-zero status; continuing with whatever output it produced."
     fi
@@ -137,7 +140,7 @@ port_scan() {
   # ── Convert nmap XML findings into ready-to-use URLs ──────
   if require_tool nmapurls && [ -s "$OUT/nmap_active.xml" ]; then
     log info "Extracting web URLs from nmap results..."
-    nmapurls < "$OUT/nmap_active.xml" 2>>"$ERR_LOG" | sort -u > "$OUT/webs_from_ports.txt" || true
+    command nmapurls < "$OUT/nmap_active.xml" 2>>"$ERR_LOG" | sort -u > "$OUT/webs_from_ports.txt" || true
     check_output "$OUT/webs_from_ports.txt" "nmapurls" || true
   fi
 
@@ -155,7 +158,7 @@ port_scan() {
 
     if require_tool smap; then
       log info "Running smap (passive port lookup)..."
-      smap -iL "$ips_nocdn" > "$OUT/portscan_passive_smap.txt" 2>>"$ERR_LOG" || true
+      command smap -iL "$ips_nocdn" > "$OUT/portscan_passive_smap.txt" 2>>"$ERR_LOG" || true
       check_output "$OUT/portscan_passive_smap.txt" "smap" || true
     fi
   fi
@@ -163,7 +166,7 @@ port_scan() {
   # ── Optional service fingerprinting (nerva) ───────────────
   if [ "${SERVICE_FINGERPRINT:-false}" = "true" ] && require_tool nerva && [ -s "$OUT/naabu_ports.txt" ]; then
     log info "Running service fingerprinting (nerva)..."
-    nerva --json -l "$OUT/naabu_ports.txt" -w "${SERVICE_FINGERPRINT_TIMEOUT_MS:-2000}" \
+    command nerva --json -l "$OUT/naabu_ports.txt" -w "${SERVICE_FINGERPRINT_TIMEOUT_MS:-2000}" \
       -o "$OUT/service_fingerprints.jsonl" 2>>"$ERR_LOG" || true
     check_output "$OUT/service_fingerprints.jsonl" "nerva" || true
   fi
